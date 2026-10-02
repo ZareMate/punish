@@ -466,6 +466,15 @@ public final class PunishService {
             created.add(ban);
         }
 
+        if (!created.isEmpty()) {
+            long caseId = created.get(0).id;
+            PunishmentRecord primary = created.get(0);
+            for (PunishmentRecord record : created) {
+                record.caseId = caseId;
+                record.primary = record == primary;
+            }
+        }
+
         save();
         return List.copyOf(created);
     }
@@ -498,6 +507,77 @@ public final class PunishService {
         record.removedBy = source.getTextName();
         record.removedAt = System.currentTimeMillis();
         DiscordLogger.log(config, record, true);
+    }
+
+    /**
+     * Removes one recorded offense case and only the punishment records that
+     * belong to that case. Related vanilla ban entries are removed only when
+     * no other live ban remains for the same UUID/IP scope.
+     */
+    public int removeOffense(MinecraftServer server, Target target, long caseId, CommandSourceStack source) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(source, "source");
+
+        if (caseId <= 0 || target.uuid() == null) return 0;
+
+        List<PunishmentRecord> related = db.records().stream()
+                .filter(r -> r.offense != null && !r.offense.isBlank())
+                .filter(r -> r.caseId == caseId)
+                .filter(r -> Objects.equals(r.uuid, target.uuid()))
+                .toList();
+
+        if (related.isEmpty()) return 0;
+
+        long now = System.currentTimeMillis();
+        boolean removedUuidBan = related.stream()
+                .anyMatch(r -> r.type.equals("ban") && !r.ipBased && r.live(now));
+        Set<String> removedIpBans = related.stream()
+                .filter(r -> r.type.equals("ban") && r.ipBased && r.live(now))
+                .map(r -> r.ip)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        String remover = source.getTextName();
+        for (PunishmentRecord record : related) {
+            record.active = false;
+            record.removedBy = remover;
+            record.removedAt = now;
+            DiscordLogger.log(config, record, true);
+        }
+
+        if (removedUuidBan) {
+            boolean otherUuidBan = db.records().stream()
+                    .filter(r -> r.live(now) && r.type.equals("ban") && !r.ipBased)
+                    .anyMatch(r -> Objects.equals(r.uuid, target.uuid()));
+
+            if (!otherUuidBan) {
+                com.mojang.authlib.GameProfile profile = target.profile();
+                if (profile == null) {
+                    try {
+                        profile = new com.mojang.authlib.GameProfile(
+                                UUID.fromString(target.uuid()),
+                                target.name()
+                        );
+                    } catch (IllegalArgumentException ignored) {
+                        profile = null;
+                    }
+                }
+                if (profile != null) server.getPlayerList().getBans().remove(profile);
+            }
+        }
+
+        for (String ip : removedIpBans) {
+            boolean otherIpBan = db.records().stream()
+                    .filter(r -> r.live(now) && r.type.equals("ban") && r.ipBased)
+                    .anyMatch(r -> Objects.equals(r.ip, ip));
+            if (!otherIpBan) {
+                server.getPlayerList().getIpBans().remove(ip);
+            }
+        }
+
+        save();
+        return related.size();
     }
 
     public int offenseCount(String uuid, String offense) {
