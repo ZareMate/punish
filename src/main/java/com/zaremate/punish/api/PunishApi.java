@@ -3,6 +3,7 @@ package com.zaremate.punish.api;
 import com.mojang.authlib.GameProfile;
 import com.zaremate.punish.PunishMod;
 import com.zaremate.punish.PunishService;
+import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentRecord;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -50,6 +51,15 @@ public final class PunishApi {
         return getCurrentPunishments(server, playerUuid).stream()
                 .filter(p -> p.type() == type)
                 .findFirst();
+    }
+
+    /**
+     * Returns every configured offense available to the /punish command.
+     * The returned list preserves the configured order.
+     */
+    public static List<Offense> getOffenses(MinecraftServer server) {
+        Objects.requireNonNull(server, "server");
+        return List.copyOf(service(server).offenses());
     }
 
     /**
