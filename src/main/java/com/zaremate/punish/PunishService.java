@@ -106,7 +106,18 @@ public final class PunishService {
         Optional<GameProfileHolder> cached = db.findCached(value);
         if (cached.isPresent()) {
             GameProfileHolder holder = cached.get();
-            return Optional.of(new Target(holder.name(), holder.uuid(), holder.ip(), null, null));
+            try {
+                UUID uuid = UUID.fromString(holder.uuid());
+                return Optional.of(new Target(
+                        holder.name(),
+                        holder.uuid(),
+                        holder.ip(),
+                        new com.mojang.authlib.GameProfile(uuid, holder.name()),
+                        null
+                ));
+            } catch (IllegalArgumentException ignored) {
+                return Optional.of(new Target(holder.name(), holder.uuid(), holder.ip(), null, null));
+            }
         }
 
         var profileCache = server.getProfileCache();
