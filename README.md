@@ -35,6 +35,20 @@ Other server-side mods can depend on Punish and use:
 
     List<Punishment> current = PunishApi.getCurrentPunishments(server, playerUuid);
 
+To get every configured offense available to `/punish`:
+
+    List<Offense> offenses = PunishApi.getOffenses(server);
+
+Each `Offense` exposes:
+
+    offense.id()
+    offense.group()
+    offense.name()
+    offense.steps()
+    offense.aliases()
+
+For example, the `xray` offense describes the configured X-Ray escalation steps and aliases.
+
 To create a punishment:
 
     Punishment punishment = PunishApi.addPunishment(
