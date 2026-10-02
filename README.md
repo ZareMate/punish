@@ -35,6 +35,10 @@ Other server-side mods can depend on Punish and use:
 
     List<Punishment> current = PunishApi.getCurrentPunishments(server, playerUuid);
 
+For the player's recorded offense cases (history):
+
+    List<Punishment> offenses = PunishApi.getRecordedOffenses(server, playerUuid);
+
 To get every configured offense available to `/punish`:
 
     List<Offense> offenses = PunishApi.getOffenses(server);
