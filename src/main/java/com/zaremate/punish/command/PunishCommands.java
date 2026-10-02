@@ -99,12 +99,36 @@ public final class PunishCommands {
                     Optional<PunishService.Target> opt = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), ipMode);
                     if (opt.isEmpty()) return fail(c, "Unknown player or IP.");
                     PunishService.Target target = opt.get();
-                    if (ipMode) c.getSource().getServer().getPlayerList().getIpBans().remove(target.ip());
-                    else c.getSource().getServer().getPlayerList().getBans().remove(target.profile());
+                    if (ipMode) {
+                        c.getSource().getServer().getPlayerList().getIpBans().remove(target.ip());
+                    } else {
+                        // UserBanList is keyed by UUID. Always provide a real profile,
+                        // including when the target was resolved from the Punish database.
+                        com.mojang.authlib.GameProfile profile = target.profile();
+                        if (profile == null && target.uuid() != null) {
+                            try {
+                                profile = new com.mojang.authlib.GameProfile(
+                                        UUID.fromString(target.uuid()),
+                                        target.name()
+                                );
+                            } catch (IllegalArgumentException ignored) {
+                                profile = null;
+                            }
+                        }
+                        if (profile != null) {
+                            c.getSource().getServer().getPlayerList().getBans().remove(profile);
+                        }
+                    }
+
                     int ended = 0;
                     for (PunishmentRecord r : service.db().records()) {
                         if (!r.active || !r.type.equals("ban") || r.ipBased != ipMode) continue;
-                        if (Objects.equals(r.uuid, target.uuid()) && Objects.equals(r.ip, target.ip())) {
+
+                        boolean matches = ipMode
+                                ? Objects.equals(r.ip, target.ip())
+                                : Objects.equals(r.uuid, target.uuid());
+
+                        if (matches) {
                             r.active = false;
                             r.removedBy = c.getSource().getTextName();
                             r.removedAt = System.currentTimeMillis();
