@@ -157,6 +157,121 @@ public final class PunishService {
         }
     }
 
+    /**
+     * Returns all currently applicable punishments for a player.
+     * UUID punishments are matched by UUID; IP punishments are matched against
+     * the current IP and every IP previously recorded for the UUID.
+     */
+    public List<PunishmentRecord> currentPunishments(String uuid, String currentIp) {
+        long now = System.currentTimeMillis();
+        Set<String> knownIps = new HashSet<>(db.ips().getOrDefault(uuid, List.of()));
+        if (currentIp != null) knownIps.add(currentIp);
+
+        return db.records().stream()
+                .filter(r -> r.live(now))
+                .filter(r -> !r.ipBased
+                        ? Objects.equals(uuid, r.uuid)
+                        : r.ip != null && knownIps.contains(r.ip))
+                .toList();
+    }
+
+    /**
+     * Creates and enforces a ban for use by another mod.
+     */
+    public PunishmentRecord addApiBan(MinecraftServer server, Target target, boolean ipBased,
+                                      long duration, String reason, String by, boolean silent) {
+        replaceActiveEquivalent("ban", ipBased, target);
+        PunishmentRecord r = create("ban", ipBased, target, reason, by, duration);
+        r.silent = silent;
+        Date expires = r.until == 0 ? null : new Date(r.until);
+
+        if (ipBased) {
+            if (target.ip() == null || target.ip().isBlank())
+                throw new IllegalArgumentException("IP is required for an IP ban");
+            server.getPlayerList().getIpBans().add(
+                    new IpBanListEntry(target.ip(), new Date(r.at), by, expires, reason));
+            server.getPlayerList().getPlayers().stream()
+                    .filter(p -> Objects.equals(ip(p), target.ip()))
+                    .forEach(p -> p.connection.disconnect(
+                            Component.literal("Your IP is banned from the server.")));
+        } else {
+            server.getPlayerList().getBans().add(
+                    new UserBanListEntry(target.profile(), new Date(r.at), by, expires, reason));
+            if (target.player() != null)
+                target.player().connection.disconnect(Component.literal("You are banned from the server."));
+        }
+
+        if (!silent) {
+            server.getPlayerList().broadcastSystemMessage(Component.literal(
+                    target.name() + " was " + (ipBased ? "IP-banned" : "banned") + " by " + by
+                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
+                            + ": " + reason), false);
+        }
+        save();
+        DiscordLogger.log(config, r, false);
+        return r;
+    }
+
+    /**
+     * Creates a mute for use by another mod.
+     */
+    public PunishmentRecord addApiMute(MinecraftServer server, Target target, boolean ipBased,
+                                       long duration, String reason, String by, boolean silent) {
+        replaceActiveEquivalent("mute", ipBased, target);
+        PunishmentRecord r = create("mute", ipBased, target, reason, by, duration);
+        r.silent = silent;
+
+        if (target.player() != null)
+            target.player().sendSystemMessage(muteComponent(r));
+
+        if (!silent) {
+            server.getPlayerList().broadcastSystemMessage(Component.literal(
+                    target.name() + " was " + (ipBased ? "IP-muted" : "muted") + " by " + by
+                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
+                            + ": " + reason), false);
+        }
+        save();
+        DiscordLogger.log(config, r, false);
+        return r;
+    }
+
+    /**
+     * Creates a warning for use by another mod.
+     */
+    public PunishmentRecord addApiWarn(MinecraftServer server, Target target, boolean ipBased,
+                                       String reason, String by, boolean silent) {
+        PunishmentRecord r = create("warn", ipBased, target, reason, by, 0);
+        r.silent = silent;
+        r.delivered = target.player() == null;
+
+        if (target.player() != null)
+            target.player().sendSystemMessage(warnComponent(r));
+
+        if (!silent) {
+            server.getPlayerList().broadcastSystemMessage(Component.literal(
+                    target.name() + " was warned by " + by + ": " + reason), false);
+        }
+        save();
+        DiscordLogger.log(config, r, false);
+        return r;
+    }
+
+    /**
+     * Records and applies a kick for use by another mod.
+     */
+    public PunishmentRecord addApiKick(Target target, String reason, String by, boolean silent) {
+        if (target.player() == null)
+            throw new IllegalArgumentException("Player must be online for a kick");
+
+        PunishmentRecord r = create("kick", false, target, reason, by, 0);
+        r.active = false;
+        r.silent = silent;
+        target.player().connection.disconnect(Component.literal("You were kicked: " + reason));
+        save();
+        DiscordLogger.log(config, r, false);
+        return r;
+    }
+
     public Optional<PunishmentRecord> activeMute(String uuid, String ip) {
         long now = System.currentTimeMillis();
         return db.records().stream()
