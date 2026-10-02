@@ -396,6 +396,79 @@ public final class PunishService {
         DiscordLogger.log(config, r, false);
     }
 
+
+    /**
+     * Applies a configured offense exactly like the /punish command.
+     *
+     * The offense name controls escalation (for example "xray" starts at
+     * the first X-Ray step and the next call becomes the second offense).
+     * The returned list contains every punishment record created by the
+     * offense, e.g. a toxicity step can create both a mute and a warning.
+     */
+    public List<PunishmentRecord> applyOffense(MinecraftServer server, Target target,
+                                                String offenseName, String rest,
+                                                String by, boolean silent) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(offenseName, "offenseName");
+        Objects.requireNonNull(by, "by");
+
+        Offense offense = findOffense(offenseName);
+        if (offense == null)
+            throw new IllegalArgumentException("Unknown offense: " + offenseName);
+
+        String cleanedRest = CommandUtil.cleanSilent(rest == null ? "" : rest);
+        Plan plan = plan(target, offense, cleanedRest);
+        if (plan.error() != null)
+            throw new IllegalArgumentException(plan.error());
+
+        String reason = offense.name() + " (" + ordinal(plan.number()) + " offense)"
+                + (plan.note().isBlank() ? "" : " - " + plan.note());
+
+        List<PunishmentRecord> created = new ArrayList<>();
+
+        if (plan.warn()) {
+            PunishmentRecord warning = addApiWarn(server, target, false, reason, by, silent);
+            warning.offense = offense.id();
+            warning.offenseNumber = plan.number();
+            warning.caseId = warning.id;
+            warning.primary = true;
+            created.add(warning);
+        }
+
+        if (plan.mute()) {
+            PunishmentRecord mute = addApiMute(server, target, false,
+                    muteLength(plan), reason, by, silent);
+            mute.offense = offense.id();
+            mute.offenseNumber = plan.number();
+            created.add(mute);
+        }
+
+        if (plan.permanent() || plan.ban() > 0) {
+            long duration = plan.permanent() ? 0 : plan.ban() + plan.bonus();
+            PunishmentRecord ban = addApiBan(server, target, false, duration, reason, by, silent);
+            ban.offense = offense.id();
+            ban.offenseNumber = plan.number();
+            ban.caseId = ban.id;
+            ban.primary = true;
+            created.add(ban);
+        }
+
+        save();
+        return List.copyOf(created);
+    }
+
+    private static String ordinal(int n) {
+        int mod100 = n % 100;
+        String suffix = mod100 >= 11 && mod100 <= 13 ? "th" : switch (n % 10) {
+            case 1 -> "st";
+            case 2 -> "nd";
+            case 3 -> "rd";
+            default -> "th";
+        };
+        return n + suffix;
+    }
+
     public Offense findOffense(String query) {
         String q = query.toLowerCase(Locale.ROOT);
         return OFFENSES.stream().filter(o ->
