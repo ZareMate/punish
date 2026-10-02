@@ -5,6 +5,7 @@ import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentDatabase;
 import com.zaremate.punish.data.PunishmentRecord;
 import com.zaremate.punish.util.DurationUtil;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -60,7 +61,10 @@ public final class PunishService {
     public PunishmentDatabase db() { return db; }
     public static Set<String> mutedCommands() { return MUTED_COMMANDS; }
 
-    public void load() { db.load(root.resolve("local").resolve("kubejs").resolve("punishments.json")); }
+    public void load() {
+        Path legacy = root.resolve("local").resolve("kubejs").resolve("punishments.json");
+        db.load(legacy);
+    }
     public void save() { db.save(); }
 
     public String staffName(net.minecraft.commands.CommandSourceStack source) {
@@ -101,7 +105,7 @@ public final class PunishService {
         Optional<GameProfileHolder> cached = db.findCached(value);
         if (cached.isPresent()) {
             GameProfileHolder holder = cached.get();
-            return Optional.of(new Target(holder.name(), holder.uuid(), holder.ip(), null));
+            return Optional.of(new Target(holder.name(), holder.uuid(), holder.ip(), null, null));
         }
 
         var profileCache = server.getProfileCache();
@@ -251,7 +255,7 @@ public final class PunishService {
         }
     }
 
-    public void applyWarn(MinecraftServer server, net.minecraft.commands.CommandSourceStack source,
+    public PunishmentRecord applyWarn(MinecraftServer server, net.minecraft.commands.CommandSourceStack source,
                           Target target, boolean ipBased, String reason, boolean silent) {
         PunishmentRecord r = create("warn", ipBased, target, reason, staffName(source), 0);
         r.silent = silent;
@@ -264,6 +268,7 @@ public final class PunishService {
                     target.name() + " was warned by " + r.by + ": " + reason), false);
         }
         DiscordLogger.log(config, r, false);
+        return r;
     }
 
     public void applyKick(CommandSourceStack source, Target target, String reason, boolean silent) {
