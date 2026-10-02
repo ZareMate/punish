@@ -2,6 +2,7 @@ package com.zaremate.punish.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -51,6 +52,7 @@ public final class PunishCommands {
         registerDupeIp(d);
         registerStaffHistory(d);
         registerPunish(d);
+        registerUnoffense(d);
 
         registerAlias(d, "pardon", "unban", false);
         registerAlias(d, "ban-ip", "ipban", true);
@@ -390,6 +392,72 @@ public final class PunishCommands {
         return builder.buildFuture();
     }
 
+    private static void registerUnoffense(CommandDispatcher<CommandSourceStack> d) {
+        d.register(Commands.literal("unoffense").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(PunishCommands::suggestPlayers)
+                        .then(Commands.argument("caseId", LongArgumentType.longArg(1))
+                                .suggests(PunishCommands::suggestCaseIds)
+                                .executes(c -> executeUnoffense(
+                                        c,
+                                        StringArgumentType.getString(c, "target"),
+                                        LongArgumentType.getLong(c, "caseId"))))));
+    }
+
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestCaseIds(
+            CommandContext<CommandSourceStack> context,
+            SuggestionsBuilder builder
+    ) {
+        String targetName = StringArgumentType.getString(context, "target");
+        Optional<PunishService.Target> target = service(context).resolve(
+                context.getSource().getServer(), targetName, false);
+        if (target.isEmpty() || target.get().uuid() == null) {
+            return builder.buildFuture();
+        }
+
+        String remaining = builder.getRemaining();
+        PunishService service = service(context);
+        service.db().records().stream()
+                .filter(r -> r.primary && r.caseId > 0)
+                .filter(r -> Objects.equals(r.uuid, target.get().uuid()))
+                .sorted(Comparator.comparingLong(r -> r.caseId))
+                .forEach(r -> {
+                    String id = Long.toString(r.caseId);
+                    if (id.startsWith(remaining)) {
+                        builder.suggest(id, Component.literal(
+                                r.offense + " (" + ordinal(r.offenseNumber) + " offense)"));
+                    }
+                });
+        return builder.buildFuture();
+    }
+
+    private static int executeUnoffense(
+            CommandContext<CommandSourceStack> c,
+            String targetName,
+            long caseId
+    ) {
+        PunishService service = service(c);
+        Optional<PunishService.Target> target = service.resolve(
+                c.getSource().getServer(), targetName, false);
+        if (target.isEmpty()) return fail(c, "Unknown player.");
+
+        int removed = service.removeOffense(
+                c.getSource().getServer(),
+                target.get(),
+                caseId,
+                c.getSource());
+
+        if (removed == 0) {
+            return fail(c, "No offense case #" + caseId + " was found for " + target.get().name() + ".");
+        }
+
+        c.getSource().sendSuccess(() -> Component.literal(
+                "Removed offense case #" + caseId + " for " + target.get().name()
+                        + " (" + removed + " related punishment record(s))."
+        ), true);
+        return removed;
+    }
+
     private static int showOffenses(CommandContext<CommandSourceStack> c, String targetName) {
         PunishService service = service(c);
         Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), targetName, false);
@@ -440,12 +508,13 @@ public final class PunishCommands {
                 + (plan.note().isBlank() ? "" : " - " + plan.note());
 
         PunishmentRecord main = null;
+        List<PunishmentRecord> caseRecords = new ArrayList<>();
+
         if (plan.warn()) {
             main = service.applyWarn(c.getSource().getServer(), c.getSource(), target.get(), false, reason, silent);
             main.offense = offense.id();
             main.offenseNumber = plan.number();
-            main.caseId = main.id;
-            main.primary = true;
+            caseRecords.add(main);
         }
         if (plan.mute()) {
             PunishmentRecord mute = service.create("mute", false, target.get(), reason,
@@ -453,6 +522,7 @@ public final class PunishCommands {
             mute.offense = offense.id();
             mute.offenseNumber = plan.number();
             mute.silent = silent;
+            caseRecords.add(mute);
             if (target.get().player() != null) target.get().player().sendSystemMessage(service.muteComponent(mute));
             DiscordLogger.log(PunishConfig.load(service.root()), mute, false);
         }
@@ -462,10 +532,19 @@ public final class PunishCommands {
             PunishmentRecord ban = service.db().records().get(service.db().records().size() - 1);
             ban.offense = offense.id();
             ban.offenseNumber = plan.number();
-            ban.caseId = ban.id;
-            ban.primary = true;
             main = ban;
+            caseRecords.add(ban);
         }
+
+        if (!caseRecords.isEmpty()) {
+            long caseId = caseRecords.get(0).id;
+            PunishmentRecord primary = caseRecords.get(0);
+            for (PunishmentRecord record : caseRecords) {
+                record.caseId = caseId;
+                record.primary = record == primary;
+            }
+        }
+
         service.save();
         c.getSource().sendSuccess(() -> Component.literal("Applied " + offense.name() + " (" + ordinal(plan.number()) + "): " + plan.label()), true);
         return main == null ? 0 : 1;
