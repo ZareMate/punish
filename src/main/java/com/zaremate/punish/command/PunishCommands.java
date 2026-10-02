@@ -6,6 +6,8 @@ import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.zaremate.punish.PunishMod;
+import com.zaremate.punish.PunishConfig;
+import com.zaremate.punish.DiscordLogger;
 import com.zaremate.punish.PunishService;
 import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentRecord;
@@ -14,6 +16,9 @@ import com.zaremate.punish.util.DurationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.ClickEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.util.*;
