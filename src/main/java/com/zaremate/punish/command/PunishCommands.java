@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.zaremate.punish.PunishMod;
 import com.zaremate.punish.PunishConfig;
 import com.zaremate.punish.DiscordLogger;
@@ -318,8 +319,10 @@ public final class PunishCommands {
     private static void registerPunish(CommandDispatcher<CommandSourceStack> d) {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("punish").requires(s -> s.hasPermission(2))
                 .then(Commands.argument("target", StringArgumentType.word())
+                        .suggests(PunishCommands::suggestPlayers)
                         .executes(c -> showOffenses(c, StringArgumentType.getString(c, "target")))
                         .then(Commands.argument("offense", StringArgumentType.word())
+                                .suggests(PunishCommands::suggestOffenses)
                                 .executes(c -> showPlan(c, StringArgumentType.getString(c, "target"),
                                         StringArgumentType.getString(c, "offense"), ""))
                                 .then(Commands.argument("rest", StringArgumentType.greedyString())
@@ -328,6 +331,39 @@ public final class PunishCommands {
                                                 StringArgumentType.getString(c, "offense"),
                                                 StringArgumentType.getString(c, "rest"))))));
         d.register(root);
+    }
+
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestPlayers(
+            CommandContext<CommandSourceStack> context,
+            SuggestionsBuilder builder
+    ) {
+        String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
+        for (var player : context.getSource().getServer().getPlayerList().getPlayers()) {
+            String name = player.getGameProfile().getName();
+            if (name.toLowerCase(Locale.ROOT).startsWith(remaining)) {
+                builder.suggest(name);
+            }
+        }
+        return builder.buildFuture();
+    }
+
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestOffenses(
+            CommandContext<CommandSourceStack> context,
+            SuggestionsBuilder builder
+    ) {
+        String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
+        PunishService service = service(context);
+        for (Offense offense : service.offenses()) {
+            if (offense.id().toLowerCase(Locale.ROOT).startsWith(remaining)) {
+                builder.suggest(offense.id());
+            }
+            for (String alias : offense.aliases()) {
+                if (alias.toLowerCase(Locale.ROOT).startsWith(remaining)) {
+                    builder.suggest(alias);
+                }
+            }
+        }
+        return builder.buildFuture();
     }
 
     private static int showOffenses(CommandContext<CommandSourceStack> c, String targetName) {
