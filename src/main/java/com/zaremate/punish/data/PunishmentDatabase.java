@@ -19,10 +19,14 @@ public final class PunishmentDatabase {
     public PunishmentDatabase(Path file) { this.file = file; }
 
     public synchronized void load() {
+        load(file);
+    }
+
+    public synchronized void load(Path source) {
         try {
             Files.createDirectories(file.getParent());
-            if (!Files.exists(file)) { save(); return; }
-            JsonObject root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            if (source == null || !Files.exists(source)) { save(); return; }
+            JsonObject root = JsonParser.parseString(Files.readString(source)).getAsJsonObject();
             next = root.has("next") ? root.get("next").getAsLong() : 1;
             records.clear();
             if (root.has("records")) root.getAsJsonArray("records").forEach(x -> records.add(PunishmentRecord.fromJson(x.getAsJsonObject())));
@@ -31,6 +35,10 @@ public final class PunishmentDatabase {
             names.clear();
             if (root.has("names")) root.getAsJsonObject("names").entrySet()
                     .forEach(e -> names.put(e.getKey(), e.getValue().getAsString()));
+            if (source != null && !source.equals(file) && Files.exists(source)) {
+                save();
+                com.zaremate.punish.PunishMod.LOGGER.info("Migrated legacy punishment database from {}", source);
+            }
         } catch (Exception e) {
             com.zaremate.punish.PunishMod.LOGGER.error("Could not load punishment database {}", file, e);
         }
