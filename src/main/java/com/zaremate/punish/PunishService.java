@@ -4,6 +4,7 @@ import com.google.gson.*;
 import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentDatabase;
 import com.zaremate.punish.data.PunishmentRecord;
+import com.zaremate.punish.util.CommandUtil;
 import com.zaremate.punish.util.DurationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
