@@ -153,6 +153,25 @@ public final class PunishApi {
 
 
     /**
+     * Returns recorded offense cases for a player, oldest first.
+     * Only the primary record of each offense case is returned, so combined
+     * punishments such as mute+warn are represented by one offense entry.
+     */
+    public static List<Punishment> getRecordedOffenses(MinecraftServer server, UUID playerUuid) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(playerUuid, "playerUuid");
+
+        PunishService service = service(server);
+        String uuid = playerUuid.toString();
+        return service.db().records().stream()
+                .filter(record -> record.offense != null && !record.offense.isBlank())
+                .filter(record -> record.primary && uuid.equals(record.uuid))
+                .sorted(java.util.Comparator.comparingLong(record -> record.at))
+                .map(PunishApi::toApi)
+                .toList();
+    }
+
+    /**
      * Applies a configured offense using the same escalation logic as /punish.
      *
      * Example: addPunishment(server, uuid, name, "xray", "TSA AntiCheat")
