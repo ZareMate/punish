@@ -1,0 +1,16 @@
+plugins { id 'java-library'; id 'net.neoforged.moddev' version '2.0.107' }
+version = mod_version
+group = mod_group_id
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+neoForge { version = neo_version }
+runs {
+    configureEach {
+        systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
+        ideName = 'NeoForge 1.21.1'
+    }
+    client { client() }
+    server { server(); programArgument '--nogui' }
+    gameTestServer { type = 'gameTestServer' }
+}
+sourceSets.main.resources.srcDir 'src/generated/resources'
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
