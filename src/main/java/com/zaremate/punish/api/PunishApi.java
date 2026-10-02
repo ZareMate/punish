@@ -141,6 +141,89 @@ public final class PunishApi {
                 player.getGameProfile().getName(), type, durationMillis, reason, by);
     }
 
+
+    /**
+     * Applies a configured offense using the same escalation logic as /punish.
+     *
+     * Example: addPunishment(server, uuid, name, "xray", "TSA AntiCheat")
+     * records an X-Ray offense and applies its configured punishment step.
+     */
+    public static List<Punishment> addPunishment(
+            MinecraftServer server,
+            UUID playerUuid,
+            String playerName,
+            String offense,
+            String by
+    ) {
+        return addPunishment(server, playerUuid, playerName, offense, "", by, false);
+    }
+
+    /**
+     * Applies a configured offense with the same optional duration/note syntax
+     * accepted after an offense in /punish.
+     *
+     * Example rest values: "3d manual review", "-s", "2d suspicious mining".
+     */
+    public static List<Punishment> addPunishment(
+            MinecraftServer server,
+            UUID playerUuid,
+            String playerName,
+            String offense,
+            String rest,
+            String by,
+            boolean silent
+    ) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(playerUuid, "playerUuid");
+        Objects.requireNonNull(playerName, "playerName");
+        Objects.requireNonNull(offense, "offense");
+        Objects.requireNonNull(by, "by");
+
+        PunishService service = service(server);
+        ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+        String targetIp = player == null ? null : service.ip(player);
+        GameProfile profile = player != null
+                ? player.getGameProfile()
+                : new GameProfile(playerUuid, playerName);
+
+        PunishService.Target target = new PunishService.Target(
+                playerName,
+                playerUuid.toString(),
+                targetIp,
+                profile,
+                player
+        );
+
+        boolean effectiveSilent = silent || com.zaremate.punish.util.CommandUtil.silent(rest);
+        return service.applyOffense(
+                        server,
+                        target,
+                        offense,
+                        com.zaremate.punish.util.CommandUtil.cleanSilent(rest),
+                        by,
+                        effectiveSilent
+                )
+                .stream()
+                .map(PunishApi::toApi)
+                .toList();
+    }
+
+    /** Convenience overload for a configured offense on an online player. */
+    public static List<Punishment> addPunishment(
+            ServerPlayer player,
+            String offense,
+            String by
+    ) {
+        Objects.requireNonNull(player, "player");
+        return addPunishment(
+                Objects.requireNonNull(player.getServer(), "player.getServer()"),
+                player.getUUID(),
+                player.getGameProfile().getName(),
+                offense,
+                by
+        );
+    }
+
     private static PunishService service(MinecraftServer server) {
         return PunishMod.service(server.getServerDirectory().toAbsolutePath());
     }
