@@ -5,9 +5,11 @@ import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentDatabase;
 import com.zaremate.punish.data.PunishmentRecord;
 import com.zaremate.punish.util.CommandUtil;
+import static com.zaremate.punish.util.ChatText.*;
 import com.zaremate.punish.util.DurationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.IpBanListEntry;
@@ -65,7 +67,7 @@ public final class PunishService {
 
     public void load() {
         Path legacy = root.resolve("local").resolve("kubejs").resolve("punishments.json");
-        db.load(legacy);
+        db.load(java.nio.file.Files.exists(file) ? file : legacy);
     }
     public void save() { db.save(); }
 
@@ -96,12 +98,12 @@ public final class PunishService {
 
     public Optional<Target> resolve(MinecraftServer server, String value, boolean ipMode) {
         ServerPlayer online = server.getPlayerList().getPlayerByName(value);
-        if (!ipMode && online != null) {
+        if (online != null) {
             return Optional.of(Target.player(online, ip(online)));
         }
 
         if (value.matches("\\d{1,3}(\\.\\d{1,3}){3}") || value.contains(":")) {
-            return Optional.of(Target.ip(value));
+            return ipMode ? Optional.of(Target.ip(value)) : Optional.empty();
         }
 
         Optional<GameProfileHolder> cached = db.findCached(value);
@@ -160,13 +162,23 @@ public final class PunishService {
     }
 
     public void alertSharedIp(ServerPlayer player) {
+        if (!config.altAlertsEnabled) return;
         String currentIp = ip(player);
         if (isLocalOrProxyIp(currentIp)) return;
         String uuid = player.getUUID().toString();
         List<String> linked = db.accounts().getOrDefault(currentIp, List.of());
         if (linked.stream().noneMatch(id -> !id.equals(uuid))) return;
+        List<String> others = linked.stream().filter(id -> !id.equals(uuid)).toList();
+        boolean banned = others.stream().anyMatch(this::hasActiveBan);
+        MutableComponent message = format((banned ? BAD : NOTE) + "&f{0} &7joined on an IP shared with: ",
+                player.getGameProfile().getName());
+        for (int i = 0; i < Math.min(5, others.size()); i++) {
+            if (i > 0) message.append(format("&7, "));
+            message.append(accountComponent(others.get(i), true));
+        }
+        if (others.size() > 5) message.append(format(" &8+{0} more", others.size() - 5));
         for (ServerPlayer staff : player.getServer().getPlayerList().getPlayers()) {
-            if (staff.hasPermissions(2)) staff.sendSystemMessage(Component.literal("[?] " + player.getGameProfile().getName() + " joined from an IP shared with another account."));
+            if (PunishPermissions.has(staff, PunishPermissions.ALERTS_ALTS)) staff.sendSystemMessage(message);
         }
     }
 
@@ -202,24 +214,19 @@ public final class PunishService {
             if (target.ip() == null || target.ip().isBlank())
                 throw new IllegalArgumentException("IP is required for an IP ban");
             server.getPlayerList().getIpBans().add(
-                    new IpBanListEntry(target.ip(), new Date(r.at), by, expires, reason));
+                    new IpBanListEntry(target.ip(), new Date(r.at), by, expires, joinNote(r)));
             server.getPlayerList().getPlayers().stream()
                     .filter(p -> Objects.equals(ip(p), target.ip()))
                     .forEach(p -> p.connection.disconnect(
-                            Component.literal("Your IP is banned from the server.")));
+                            screen(r, "Your IP is banned from CreateCraft")));
         } else {
             server.getPlayerList().getBans().add(
-                    new UserBanListEntry(target.profile(), new Date(r.at), by, expires, reason));
+                    new UserBanListEntry(target.profile(), new Date(r.at), by, expires, joinNote(r)));
             if (target.player() != null)
-                target.player().connection.disconnect(Component.literal("You are banned from the server."));
+                target.player().connection.disconnect(screen(r, "You are banned from CreateCraft"));
         }
 
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was " + (ipBased ? "IP-banned" : "banned") + " by " + by
-                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
-                            + ": " + reason), false);
-        }
+        announce(server, r);
         save();
         DiscordLogger.log(config, r, false);
         return r;
@@ -237,12 +244,7 @@ public final class PunishService {
         if (target.player() != null)
             target.player().sendSystemMessage(muteComponent(r));
 
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was " + (ipBased ? "IP-muted" : "muted") + " by " + by
-                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
-                            + ": " + reason), false);
-        }
+        announce(server, r);
         save();
         DiscordLogger.log(config, r, false);
         return r;
@@ -255,15 +257,12 @@ public final class PunishService {
                                        String reason, String by, boolean silent) {
         PunishmentRecord r = create("warn", ipBased, target, reason, by, 0);
         r.silent = silent;
-        r.delivered = target.player() == null;
+        r.delivered = target.player() != null;
 
         if (target.player() != null)
             target.player().sendSystemMessage(warnComponent(r));
 
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was warned by " + by + ": " + reason), false);
-        }
+        announce(server, r);
         save();
         DiscordLogger.log(config, r, false);
         return r;
@@ -279,7 +278,8 @@ public final class PunishService {
         PunishmentRecord r = create("kick", false, target, reason, by, 0);
         r.active = false;
         r.silent = silent;
-        target.player().connection.disconnect(Component.literal("You were kicked: " + reason));
+        target.player().connection.disconnect(screen(r, "You were kicked from CreateCraft"));
+        announce(target.player().getServer(), r);
         save();
         DiscordLogger.log(config, r, false);
         return r;
@@ -302,13 +302,112 @@ public final class PunishService {
                 .findFirst();
     }
 
+    private boolean hasActiveBan(String uuid) {
+        return db.records().stream().anyMatch(r -> "ban".equals(r.type)
+                && r.live(System.currentTimeMillis()) && Objects.equals(uuid, r.uuid));
+    }
+
+    public Component accountComponent(String uuid, boolean label) {
+        boolean banned = hasActiveBan(uuid);
+        return format((banned ? "&c" : "&f") + "{0}" + (banned && label ? " &8(banned)" : ""),
+                db.names().getOrDefault(uuid, uuid));
+    }
+
+    public void announce(MinecraftServer server, PunishmentRecord record) {
+        Component message = announcement(record);
+        if (!record.silent) server.getPlayerList().broadcastSystemMessage(message, false);
+        else server.getPlayerList().getPlayers().stream().filter(p -> PunishPermissions.has(p, PunishPermissions.NOTIFY_SILENT))
+                .forEach(p -> p.sendSystemMessage(message));
+    }
+
+    private static String date(long millis, String pattern) {
+        return java.time.format.DateTimeFormatter.ofPattern(pattern)
+                .withZone(java.time.ZoneId.systemDefault()).format(Instant.ofEpochMilli(millis));
+    }
+
+    Component screen(PunishmentRecord r, String headline) {
+        MutableComponent message = format(TITLE + "\n\n<#FF4343>&l{0}\n\n&7Reason: &f{1}\n&7By: &f{2}",
+                headline, r.reason, r.by);
+        if ("ban".equals(r.type)) {
+            message.append(r.until > 0
+                    ? format("\n&7Expires: &fin {0} &8({1})", DurationUtil.format(r.until - System.currentTimeMillis()), date(r.until, "dd.MM.yyyy HH:mm"))
+                    : format("\n&7Duration: &cPermanent"));
+        }
+        return message.append(format("\n&7Case: &f#{0}\n\n&7Appeal in our Discord: <#6894E5>{1}\n&8Open a ticket and pick \"Other Support\"", r.id, config.appealDiscord));
+    }
+
+    String joinNote(PunishmentRecord r) {
+        return "§f" + r.reason + "\n\n§7By §f" + r.by + " §8| §7Case §f#" + r.id
+                + (r.until > 0 ? "" : "\n§7Duration: §cPermanent")
+                + "\n\n§7Appeal in our Discord: §9" + config.appealDiscord
+                + "\n§8Open a ticket and pick \"Other Support\"" + (r.until > 0 ? "\n" : "");
+    }
+
+    public Component recordComponent(PunishmentRecord r) {
+        String state = "kick".equals(r.type) ? "" : !r.active
+                ? (r.replaced ? " &8[replaced]" : " &8[removed]")
+                : r.until > 0 && r.until <= System.currentTimeMillis() ? " &8[expired]" : " &a[active]";
+        String duration = "ban".equals(r.type) || "mute".equals(r.type)
+                ? " " + (r.until > 0 ? DurationUtil.format(r.until - r.at) : "perm") : "";
+        return format("&8#{0} &c{1}&f{2} &7by &f{3} &8{4} &7- &f{5}" + state,
+                r.id, (r.ipBased ? "IP" : "") + r.type.toUpperCase(Locale.ROOT), duration,
+                r.by, date(r.at, "dd.MM.yyyy"), r.reason);
+    }
+
+    private static MutableComponent text(String value, int color) {
+        return Component.literal(value).withStyle(style -> style.withColor(color).withBold(false));
+    }
+
+    private static MutableComponent punishmentPrefix() {
+        return Component.empty()
+                .append(text("[", 0x8B1E1E))
+                .append(text("!", 0xFF4343).withStyle(style -> style.withBold(true)))
+                .append(text("] ", 0x8B1E1E));
+    }
+
+    Component announcement(PunishmentRecord r) {
+        String verb = switch (r.type) {
+            case "ban" -> "banned";
+            case "mute" -> "muted";
+            case "kick" -> "kicked";
+            default -> "warned";
+        };
+        int color = switch (r.type) {
+            case "ban", "kick" -> 0xFF5555;
+            case "mute" -> 0xFFAA00;
+            default -> 0xFFFF55;
+        };
+        MutableComponent message = (r.silent ? format(SILENT) : punishmentPrefix())
+                .append(text(r.name == null || r.name.isBlank() ? "an IP address" : r.name, 0xFFFFFF))
+                .append(text(" was ", 0xAAAAAA))
+                .append(text((r.ipBased ? "IP-" : "") + verb, color))
+                .append(text(" by ", 0xAAAAAA))
+                .append(text(r.by, 0xFFFFFF));
+        if (r.until > 0) {
+            message.append(text(" for ", 0xAAAAAA))
+                    .append(text(DurationUtil.format(r.until - r.at), 0xFFFFFF));
+        }
+        return message.append(text(": ", 0xAAAAAA)).append(text(r.reason, 0xFFFFFF));
+    }
+
     public Component muteComponent(PunishmentRecord r) {
-        String duration = r.until > 0 ? " for " + DurationUtil.format(r.until - System.currentTimeMillis()) : " permanently";
-        return Component.literal("[!] You are muted" + duration + ". Reason: " + r.reason + " (#" + r.id + ")");
+        return punishmentPrefix()
+                .append(text("You are muted" + (r.until > 0 ? " for " : " "), 0xAAAAAA))
+                .append(text(r.until > 0 ? DurationUtil.format(r.until - System.currentTimeMillis()) : "permanently", 0xFFFFFF))
+                .append(text(". Reason: ", 0xAAAAAA))
+                .append(text(r.reason, 0xFFFFFF))
+                .append(text(" (#" + r.id + ")", 0x555555));
     }
 
     public Component warnComponent(PunishmentRecord r) {
-        return Component.literal("[!] You were warned by " + r.by + ": " + r.reason + " (#" + r.id + ")");
+        MutableComponent message = punishmentPrefix()
+                .append(text("You were warned by ", 0xAAAAAA))
+                .append(text(r.by, 0xFFFFFF))
+                .append(text(": ", 0xAAAAAA))
+                .append(text(r.reason, 0xFFFFFF));
+        int count = r.ipBased || r.uuid == null ? 0 : warningCount(r.uuid);
+        if (count > 0) message.append(text(" (warning " + count + ")", 0x555555));
+        return message;
     }
 
     public PunishmentRecord create(String type, boolean ipBased, Target target, String reason, String by, long duration) {
@@ -331,7 +430,7 @@ public final class PunishService {
         long now = System.currentTimeMillis();
         db.records().stream()
                 .filter(r -> r.live(now) && r.type.equals(type) && r.ipBased == ipBased)
-                .filter(r -> Objects.equals(r.uuid, target.uuid()) && Objects.equals(r.ip, target.ip()))
+                .filter(r -> (ipBased ? Objects.equals(r.ip, target.ip()) : Objects.equals(r.uuid, target.uuid())))
                 .forEach(r -> {
                     r.active = false;
                     r.replaced = true;
@@ -348,23 +447,18 @@ public final class PunishService {
 
         Date expires = r.until == 0 ? null : new Date(r.until);
         if (ipBased) {
-            server.getPlayerList().getIpBans().add(new IpBanListEntry(target.ip(), new Date(r.at), r.by, expires, reason));
+            server.getPlayerList().getIpBans().add(new IpBanListEntry(target.ip(), new Date(r.at), r.by, expires, joinNote(r)));
             server.getPlayerList().getPlayers().stream()
                     .filter(p -> Objects.equals(ip(p), target.ip()))
-                    .forEach(p -> p.connection.disconnect(Component.literal("Your IP is banned from the server.")));
+                    .forEach(p -> p.connection.disconnect(screen(r, "Your IP is banned from CreateCraft")));
         } else {
-            server.getPlayerList().getBans().add(new UserBanListEntry(target.profile(), new Date(r.at), r.by, expires, reason));
+            server.getPlayerList().getBans().add(new UserBanListEntry(target.profile(), new Date(r.at), r.by, expires, joinNote(r)));
             if (target.player() != null) {
-                target.player().connection.disconnect(Component.literal("You are banned from the server."));
+                target.player().connection.disconnect(screen(r, "You are banned from CreateCraft"));
             }
         }
 
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was " + (ipBased ? "IP-banned" : "banned") + " by " + r.by
-                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
-                            + ": " + reason), false);
-        }
+        announce(server, r);
     }
 
     public void applyMute(MinecraftServer server, net.minecraft.commands.CommandSourceStack source,
@@ -375,26 +469,18 @@ public final class PunishService {
         save();
 
         if (target.player() != null) target.player().sendSystemMessage(muteComponent(r));
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was " + (ipBased ? "IP-muted" : "muted") + " by " + r.by
-                            + (duration > 0 ? " for " + DurationUtil.format(duration) : "")
-                            + ": " + reason), false);
-        }
+        announce(server, r);
     }
 
     public PunishmentRecord applyWarn(MinecraftServer server, net.minecraft.commands.CommandSourceStack source,
                           Target target, boolean ipBased, String reason, boolean silent) {
         PunishmentRecord r = create("warn", ipBased, target, reason, staffName(source), 0);
         r.silent = silent;
-        r.delivered = target.player() == null;
+        r.delivered = target.player() != null;
         save();
 
         if (target.player() != null) target.player().sendSystemMessage(warnComponent(r));
-        if (!silent) {
-            server.getPlayerList().broadcastSystemMessage(Component.literal(
-                    target.name() + " was warned by " + r.by + ": " + reason), false);
-        }
+        announce(server, r);
         DiscordLogger.log(config, r, false);
         return r;
     }
@@ -405,7 +491,8 @@ public final class PunishService {
         r.active = false;
         r.silent = silent;
         save();
-        target.player().connection.disconnect(Component.literal("You were kicked: " + reason));
+        target.player().connection.disconnect(screen(r, "You were kicked from CreateCraft"));
+        announce(target.player().getServer(), r);
         DiscordLogger.log(config, r, false);
     }
 

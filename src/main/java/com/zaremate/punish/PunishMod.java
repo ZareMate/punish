@@ -17,6 +17,7 @@ public final class PunishMod {
     private static PunishService service;
 
     public PunishMod(IEventBus modBus) {
+        NeoForge.EVENT_BUS.addListener(PunishPermissions::register);
         NeoForge.EVENT_BUS.addListener(PunishCommands::register);
         PunishEvents.register();
     }

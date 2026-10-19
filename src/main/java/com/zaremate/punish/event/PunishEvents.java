@@ -42,7 +42,9 @@ public final class PunishEvents {
         if (!(source.getEntity() instanceof ServerPlayer player) || player.getServer() == null) return;
 
         String raw = event.getParseResults().getReader().getString().replaceFirst("^/", "");
-        String command = raw.split("\\s+", 2)[0].toLowerCase();
+        String command = raw.split("\\s+", 2)[0].toLowerCase(java.util.Locale.ROOT);
+        // Vanilla namespaced aliases must obey the same mute as their short names.
+        if (command.startsWith("minecraft:")) command = command.substring("minecraft:".length());
         var service = PunishMod.service(player.getServer().getServerDirectory().toAbsolutePath());
         if (!service.mutedCommands().contains(command)) return;
 

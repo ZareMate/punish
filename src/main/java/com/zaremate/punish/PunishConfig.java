@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class PunishConfig {
+    public boolean altAlertsEnabled = true;
+    public String appealDiscord = "discord.gg/m64gHWxhW7";
     public boolean discordEnabled = false;
     public String serverName = "CreateCraft Season 6";
     public String warnWebhook = "";

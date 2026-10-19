@@ -44,3 +44,39 @@ tasks.withType(ProcessResources).configureEach {
 }
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+repositories { mavenCentral() }
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.mockito:mockito-core:5.14.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    // Execute tests on every build, even when sources and test inputs are unchanged.
+    outputs.upToDateWhen { false }
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat = 'full'
+    }
+    addTestListener(new TestListener() {
+        void beforeSuite(TestDescriptor descriptor) {}
+        void beforeTest(TestDescriptor descriptor) {}
+        void afterTest(TestDescriptor descriptor, TestResult result) {}
+        void afterSuite(TestDescriptor descriptor, TestResult result) {
+            if (descriptor.parent == null) {
+                println "Tests: ${result.testCount} total, ${result.successfulTestCount} passed, ${result.failedTestCount} failed, ${result.skippedTestCount} skipped"
+            }
+        }
+    })
+    workingDir layout.buildDirectory.dir('test-work').get().asFile
+    doFirst { workingDir.mkdirs() }
+    systemProperty 'user.timezone', 'UTC'
+}
+
+// Tests use Minecraft classes and mocked server boundaries without launching a server.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath

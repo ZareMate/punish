@@ -15,6 +15,7 @@ run/
 .vscode/
 
 # Eclipse
+.eclipse/
 .classpath
 .project
 .settings/

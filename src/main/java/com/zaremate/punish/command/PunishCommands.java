@@ -8,12 +8,14 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.zaremate.punish.PunishMod;
+import com.zaremate.punish.PunishPermissions;
 import com.zaremate.punish.PunishConfig;
 import com.zaremate.punish.DiscordLogger;
 import com.zaremate.punish.PunishService;
 import com.zaremate.punish.data.Offense;
 import com.zaremate.punish.data.PunishmentRecord;
 import com.zaremate.punish.util.CommandUtil;
+import static com.zaremate.punish.util.ChatText.*;
 import com.zaremate.punish.util.DurationUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -43,7 +45,8 @@ public final class PunishCommands {
         registerUnmute(d);
         registerWarn(d, "warn", false);
         registerWarn(d, "ipwarn", true);
-        registerUnwarn(d);
+        registerUnwarn(d, "unwarn");
+        registerUnwarn(d, "warn_remove");
         registerWarnings(d);
         registerKick(d);
         registerHistory(d);
@@ -60,8 +63,8 @@ public final class PunishCommands {
     }
 
     private static void registerBan(CommandDispatcher<CommandSourceStack> d, String name, boolean durationRequired, boolean ipMode) {
-        d.register(Commands.literal(name).requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word())
+        d.register(Commands.literal(name).requires(s -> PunishPermissions.command(s, name))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                         .executes(c -> executeBan(c, name, durationRequired, ipMode))
                         .then(Commands.argument("rest", StringArgumentType.greedyString())
                                 .executes(c -> executeBan(c, name, durationRequired, ipMode)))));
@@ -95,8 +98,8 @@ public final class PunishCommands {
     }
 
     private static void registerUnban(CommandDispatcher<CommandSourceStack> d, String name, boolean ipMode) {
-        d.register(Commands.literal(name).requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal(name).requires(s -> PunishPermissions.command(s, name))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> opt = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), ipMode);
                     if (opt.isEmpty()) return fail(c, "Unknown player or IP.");
@@ -138,14 +141,14 @@ public final class PunishCommands {
                         }
                     }
                     service.save();
-                    c.getSource().sendSuccess(() -> Component.literal("Unbanned " + (ipMode ? target.ip() : target.name()) + "."), true);
+                    c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &7was &a{1} &7by &f{2}", target.name(), ipMode ? "IP-unbanned" : "unbanned", service.staffName(c.getSource())), true);
                     return ended > 0 ? 1 : 0;
                 })));
     }
 
     private static void registerMute(CommandDispatcher<CommandSourceStack> d, String name, boolean durationRequired, boolean ipMode) {
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name).requires(s -> s.hasPermission(2));
-        root.then(Commands.argument("target", StringArgumentType.word())
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name).requires(s -> PunishPermissions.command(s, name));
+        root.then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                 .executes(c -> executeMute(c, durationRequired, ipMode, ""))
                 .then(Commands.argument("rest", StringArgumentType.greedyString())
                         .executes(c -> executeMute(c, durationRequired, ipMode, StringArgumentType.getString(c, "rest")))));
@@ -176,8 +179,8 @@ public final class PunishCommands {
     }
 
     private static void registerUnmute(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("unmute").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal("unmute").requires(s -> PunishPermissions.command(s, "unmute"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
                     if (target.isEmpty()) return fail(c, "Unknown player.");
@@ -193,14 +196,17 @@ public final class PunishCommands {
                         }
                     }
                     service.save();
-                    if (target.get().player() != null) target.get().player().sendSystemMessage(Component.literal("You are no longer muted."));
+                    if (ended == 0) return fail(c, target.get().name() + " is not muted.");
+                    c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &7was &aunmuted &7by &f{1}",
+                            target.get().name(), service.staffName(c.getSource())), true);
+                    if (target.get().player() != null) target.get().player().sendSystemMessage(format(GOOD + "&7You are no longer muted."));
                     return ended;
                 })));
     }
 
     private static void registerWarn(CommandDispatcher<CommandSourceStack> d, String name, boolean ipMode) {
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name).requires(s -> s.hasPermission(2));
-        root.then(Commands.argument("target", StringArgumentType.word())
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name).requires(s -> PunishPermissions.command(s, name));
+        root.then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                 .executes(c -> executeWarn(c, ipMode, ""))
                 .then(Commands.argument("reason", StringArgumentType.greedyString())
                         .executes(c -> executeWarn(c, ipMode, StringArgumentType.getString(c, "reason")))));
@@ -220,48 +226,51 @@ public final class PunishCommands {
         return 1;
     }
 
-    private static void registerUnwarn(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("unwarn").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
-                    PunishService service = service(c);
-                    Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
-                    if (target.isEmpty()) return fail(c, "Unknown player.");
-                    PunishmentRecord latest = null;
-                    for (PunishmentRecord r : service.db().records()) {
-                        if (r.live(System.currentTimeMillis()) && r.type.equals("warn") && !r.ipBased
-                                && Objects.equals(r.uuid, target.get().uuid())) latest = r;
-                    }
-                    if (latest == null) return fail(c, "Player has no active warning.");
-                    latest.active = false;
-                    latest.removedBy = c.getSource().getTextName();
-                    latest.removedAt = System.currentTimeMillis();
-                    service.save();
-                    return 1;
-                })));
+    private static void registerUnwarn(CommandDispatcher<CommandSourceStack> d, String name) {
+        d.register(Commands.literal(name).requires(s -> PunishPermissions.command(s, name))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
+                        .executes(c -> executeUnwarn(c, 0))
+                        .then(Commands.argument("warningId", LongArgumentType.longArg(1))
+                                .executes(c -> executeUnwarn(c, LongArgumentType.getLong(c, "warningId"))))));
+    }
+
+    private static int executeUnwarn(CommandContext<CommandSourceStack> c, long warningId) {
+        PunishService service = service(c);
+        Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(),
+                StringArgumentType.getString(c, "target"), false);
+        if (target.isEmpty()) return fail(c, "Unknown player.");
+        PunishmentRecord warning = service.db().records().stream()
+                .filter(r -> r.live(System.currentTimeMillis()) && r.type.equals("warn") && !r.ipBased)
+                .filter(r -> Objects.equals(r.uuid, target.get().uuid()))
+                .filter(r -> warningId == 0 || r.id == warningId)
+                .max(Comparator.comparingLong((PunishmentRecord r) -> r.at).thenComparingLong(r -> r.id))
+                .orElse(null);
+        if (warning == null) return fail(c, warningId == 0 ? "Player has no active warning."
+                : "No active warning #" + warningId + " was found for " + target.get().name() + ".");
+        warning.active = false;
+        warning.removedBy = c.getSource().getTextName();
+        warning.removedAt = System.currentTimeMillis();
+        service.save();
+        c.getSource().sendSuccess(() -> format(GOOD + "&7Removed warning &f#{0} &7from &f{1}&7 ({2} left).",
+                warning.id, target.get().name(), service.warningCount(target.get().uuid())), false);
+        return 1;
     }
 
     private static void registerWarnings(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("warnings").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal("warnings").requires(s -> PunishPermissions.command(s, "warnings"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
                     if (target.isEmpty()) return fail(c, "Unknown player.");
-                    int count = 0;
-                    for (PunishmentRecord r : service.db().records()) {
-                        if (r.type.equals("warn") && r.active && Objects.equals(r.uuid, target.get().uuid())) {
-                            c.getSource().sendSuccess(() -> Component.literal("#" + r.id + " " + r.reason + " by " + r.by), false);
-                            count++;
-                        }
-                    }
-                    final int totalWarnings = count;
-                    c.getSource().sendSuccess(() -> Component.literal("Warnings: " + totalWarnings), false);
-                    return totalWarnings;
+                    return showRecords(c, "Warnings of " + target.get().name(), service.db().records().stream()
+                            .filter(r -> r.type.equals("warn") && r.active && !r.ipBased
+                                    && Objects.equals(r.uuid, target.get().uuid())).toList());
                 })));
     }
 
     private static void registerKick(CommandDispatcher<CommandSourceStack> d) {
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("kick").requires(s -> s.hasPermission(2));
-        root.then(Commands.argument("target", StringArgumentType.word())
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("kick").requires(s -> PunishPermissions.command(s, "kick"));
+        root.then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                 .executes(c -> executeKick(c, ""))
                 .then(Commands.argument("reason", StringArgumentType.greedyString())
                         .executes(c -> executeKick(c, StringArgumentType.getString(c, "reason")))));
@@ -280,8 +289,8 @@ public final class PunishCommands {
     }
 
     private static void registerHistory(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("history").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal("history").requires(s -> PunishPermissions.command(s, "history"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
                     if (target.isEmpty()) return fail(c, "Unknown player.");
@@ -289,29 +298,31 @@ public final class PunishCommands {
                             .filter(r -> Objects.equals(r.uuid, target.get().uuid())
                                     || (r.ipBased && target.get().ip() != null && target.get().ip().equals(r.ip)))
                             .toList();
-                    list.stream().skip(Math.max(0, list.size() - 10)).forEach(r ->
-                            c.getSource().sendSuccess(() -> Component.literal("#" + r.id + " [" + r.type + "] " + r.reason + " by " + r.by), false));
-                    return list.size();
+                    return showRecords(c, "History of " + target.get().name(), list);
                 })));
     }
 
     private static void registerCheck(CommandDispatcher<CommandSourceStack> d, String command, String type) {
-        d.register(Commands.literal(command).requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal(command).requires(s -> PunishPermissions.command(s, command))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
                     if (target.isEmpty()) return fail(c, "Unknown player.");
                     Optional<PunishmentRecord> found = service.activePunishment(target.get().uuid(), target.get().ip(), type);
-                    c.getSource().sendSuccess(() -> Component.literal(found.map(r ->
-                            target.get().name() + " is " + type + ": " + r.reason + " (#" + r.id + ")"
-                    ).orElse(target.get().name() + " is not " + type + ".")), false);
+                    String word = type.equals("ban") ? "banned" : "muted";
+                    c.getSource().sendSuccess(() -> format((found.isPresent() ? BAD : GOOD)
+                            + "&f{0} &7is {1}{2}{3}", target.get().name(), found.isPresent() ? "" : "not ",
+                            word, found.isPresent() ? ":" : "."), false);
+                    found.ifPresent(r -> c.getSource().sendSuccess(() -> service.recordComponent(r).copy()
+                            .append(r.until > 0 ? format(" &8(ends in {0})", DurationUtil.format(r.until - System.currentTimeMillis()))
+                                    : Component.empty()), false));
                     return 1;
                 })));
     }
 
     private static void registerDupeIp(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("dupeip").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal("dupeip").requires(s -> PunishPermissions.command(s, "dupeip"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     PunishService service = service(c);
                     Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), StringArgumentType.getString(c, "target"), false);
                     if (target.isEmpty()) return fail(c, "Unknown player.");
@@ -322,30 +333,29 @@ public final class PunishCommands {
                         }
                     }
                     if (otherIds.isEmpty()) {
-                        c.getSource().sendSuccess(() -> Component.literal(target.get().name() + " shares no known IP."), false);
+                        c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &7shares no IP with anyone.", target.get().name()), false);
                     } else {
+                        c.getSource().sendSuccess(() -> format(BAD + "&f{0} &7shares an IP with:", target.get().name()), false);
                         otherIds.forEach(id -> c.getSource().sendSuccess(() ->
-                                Component.literal("- " + service.db().names().getOrDefault(id, id)), false));
+                                format("&8- ").append(service.accountComponent(id, false)), false));
                     }
                     return otherIds.size();
                 })));
     }
 
     private static void registerStaffHistory(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("staffhistory").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("staff", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal("staffhistory").requires(s -> PunishPermissions.command(s, "staffhistory"))
+                .then(Commands.argument("staff", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     String name = StringArgumentType.getString(c, "staff");
                     PunishService service = service(c);
-                    long count = service.db().records().stream().filter(r -> r.by.equalsIgnoreCase(name)).peek(r ->
-                            c.getSource().sendSuccess(() -> Component.literal("#" + r.id + " [" + r.type + "] " + r.name + " - " + r.reason), false)).count();
-                    return (int) count;
+                    return showRecords(c, "Punishments by " + name, service.db().records().stream()
+                            .filter(r -> r.by.equalsIgnoreCase(name)).toList());
                 })));
     }
 
     private static void registerPunish(CommandDispatcher<CommandSourceStack> d) {
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("punish").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word())
-                        .suggests(PunishCommands::suggestPlayers)
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("punish").requires(s -> PunishPermissions.command(s, "punish"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                         .executes(c -> showOffenses(c, StringArgumentType.getString(c, "target")))
                         .then(Commands.argument("offense", StringArgumentType.word())
                                 .suggests(PunishCommands::suggestOffenses)
@@ -364,11 +374,14 @@ public final class PunishCommands {
             SuggestionsBuilder builder
     ) {
         String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
+        Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         for (var player : context.getSource().getServer().getPlayerList().getPlayers()) {
-            String name = player.getGameProfile().getName();
-            if (name.toLowerCase(Locale.ROOT).startsWith(remaining)) {
-                builder.suggest(name);
-            }
+            names.add(player.getGameProfile().getName());
+        }
+        service(context).db().names().values().stream()
+                .filter(Objects::nonNull).filter(name -> !name.isBlank()).forEach(names::add);
+        for (String name : names) {
+            if (name.toLowerCase(Locale.ROOT).startsWith(remaining)) builder.suggest(name);
         }
         return builder.buildFuture();
     }
@@ -393,9 +406,8 @@ public final class PunishCommands {
     }
 
     private static void registerUnoffense(CommandDispatcher<CommandSourceStack> d) {
-        d.register(Commands.literal("unoffense").requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word())
-                        .suggests(PunishCommands::suggestPlayers)
+        d.register(Commands.literal("unoffense").requires(s -> PunishPermissions.command(s, "unoffense"))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers)
                         .then(Commands.argument("caseId", LongArgumentType.longArg(1))
                                 .suggests(PunishCommands::suggestCaseIds)
                                 .executes(c -> executeUnoffense(
@@ -424,8 +436,7 @@ public final class PunishCommands {
                 .forEach(r -> {
                     String id = Long.toString(r.caseId);
                     if (id.startsWith(remaining)) {
-                        builder.suggest(id, Component.literal(
-                                r.offense + " (" + ordinal(r.offenseNumber) + " offense)"));
+                        builder.suggest(id, format("&f{0} &8({1} offense)", r.offense, ordinal(r.offenseNumber)));
                     }
                 });
         return builder.buildFuture();
@@ -451,10 +462,8 @@ public final class PunishCommands {
             return fail(c, "No offense case #" + caseId + " was found for " + target.get().name() + ".");
         }
 
-        c.getSource().sendSuccess(() -> Component.literal(
-                "Removed offense case #" + caseId + " for " + target.get().name()
-                        + " (" + removed + " related punishment record(s))."
-        ), true);
+        c.getSource().sendSuccess(() -> format(GOOD + "&7Removed offense case &f#{0} &7for &f{1} &8({2} related punishment record(s)).",
+                caseId, target.get().name(), removed), true);
         return removed;
     }
 
@@ -463,20 +472,20 @@ public final class PunishCommands {
         Optional<PunishService.Target> target = service.resolve(c.getSource().getServer(), targetName, false);
         if (target.isEmpty()) return fail(c, "Unknown player.");
 
-        c.getSource().sendSuccess(() -> Component.literal(target.get().name() + " - select an offense:"), false);
+        c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &7has &f{1} &7warnings{2}. Click an offense:", target.get().name(), service.warningCount(target.get().uuid()), service.warningBonus(service.warningCount(target.get().uuid())) > 0 ? " (bans get +" + DurationUtil.format(service.warningBonus(service.warningCount(target.get().uuid()))) + ")" : ""), false);
         String group = "";
         for (Offense offense : service.offenses()) {
             if (!group.equals(offense.group())) {
                 group = offense.group();
                 final String groupName = group;
-                c.getSource().sendSuccess(() -> Component.literal("[" + groupName + "]"), false);
+                c.getSource().sendSuccess(() -> format("&c&l{0}", groupName.toUpperCase(Locale.ROOT)), false);
             }
             var plan = service.plan(target.get(), offense, "");
             String command = "/punish " + target.get().name() + " " + offense.id();
-            Component line = Component.literal("› " + offense.name() + " » " + ordinal(plan.number()) + ": " + plan.label())
+            Component line = format("&8› &f{0} &8» &7{1}: &f{2}", offense.name(), ordinal(plan.number()), plan.label())
                     .setStyle(Style.EMPTY
                             .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command + " "))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to fill " + command))));
+                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, format("&7Click to fill in &f{0}", command))));
             c.getSource().sendSuccess(() -> line, false);
         }
         return 1;
@@ -489,9 +498,8 @@ public final class PunishCommands {
         if (target.isEmpty() || offense == null) return fail(c, "Unknown target or offense.");
         var plan = service.plan(target.get(), offense, CommandUtil.cleanSilent(rest));
         if (plan.error() != null) return fail(c, plan.error());
-        c.getSource().sendSuccess(() -> Component.literal(
-                offense.name() + " -> " + plan.label() + " (" + ordinal(plan.number())
-                        + " offense, warning bonus " + DurationUtil.format(plan.bonus()) + ")"), false);
+        c.getSource().sendSuccess(() -> format(GOOD + "&f{0}&7: {1} &f{2} &7offense » &f{3} &8(warning bonus {4})",
+                target.get().name(), ordinal(plan.number()), offense.name(), plan.label(), DurationUtil.format(plan.bonus())), false);
         return 1;
     }
 
@@ -524,6 +532,7 @@ public final class PunishCommands {
             mute.silent = silent;
             caseRecords.add(mute);
             if (target.get().player() != null) target.get().player().sendSystemMessage(service.muteComponent(mute));
+            service.announce(c.getSource().getServer(), mute);
             DiscordLogger.log(PunishConfig.load(service.root()), mute, false);
         }
         if (plan.permanent() || plan.ban() > 0) {
@@ -546,8 +555,19 @@ public final class PunishCommands {
         }
 
         service.save();
-        c.getSource().sendSuccess(() -> Component.literal("Applied " + offense.name() + " (" + ordinal(plan.number()) + "): " + plan.label()), true);
+        c.getSource().sendSuccess(() -> format(GOOD + "&f{0}&7: {1} &f{2} &7offense » &f{3}", target.get().name(), ordinal(plan.number()), offense.name(), plan.label()), true);
         return main == null ? 0 : 1;
+    }
+
+    private static int showRecords(CommandContext<CommandSourceStack> c, String title, List<PunishmentRecord> records) {
+        c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &8({1})", title, records.size()), false);
+        for (int i = records.size() - 1; i >= Math.max(0, records.size() - 10); i--) {
+            PunishmentRecord record = records.get(i);
+            c.getSource().sendSuccess(() -> service(c).recordComponent(record), false);
+        }
+        if (records.size() > 10)
+            c.getSource().sendSuccess(() -> format("&8...and {0} older", records.size() - 10), false);
+        return records.size();
     }
 
     private static String ordinal(int n) {
@@ -559,8 +579,8 @@ public final class PunishCommands {
     }
 
     private static void registerAlias(CommandDispatcher<CommandSourceStack> d, String alias, String command, boolean ipMode) {
-        d.register(Commands.literal(alias).requires(s -> s.hasPermission(2))
-                .then(Commands.argument("target", StringArgumentType.word()).executes(c -> {
+        d.register(Commands.literal(alias).requires(s -> PunishPermissions.command(s, command))
+                .then(Commands.argument("target", StringArgumentType.word()).suggests(PunishCommands::suggestPlayers).executes(c -> {
                     return switch (command) {
                         case "unban" -> executeUnbanAlias(c, false);
                         case "ipban" -> executeBan(c, "ipban", false, true);
@@ -587,7 +607,7 @@ public final class PunishCommands {
             }
         }
         service.save();
-        c.getSource().sendSuccess(() -> Component.literal("Unbanned " + (ipMode ? target.get().ip() : target.get().name()) + "."), true);
+        c.getSource().sendSuccess(() -> format(GOOD + "&f{0} &7was &a{1} &7by &f{2}", target.get().name(), ipMode ? "IP-unbanned" : "unbanned", service.staffName(c.getSource())), true);
         return 1;
     }
 
@@ -600,7 +620,7 @@ public final class PunishCommands {
     }
 
     private static int fail(CommandContext<CommandSourceStack> c, String message) {
-        c.getSource().sendFailure(Component.literal(message));
+        c.getSource().sendSystemMessage(format(BAD + "&7{0}", message));
         return 0;
     }
 }

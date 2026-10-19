@@ -13,17 +13,22 @@ public final class DurationUtil {
         if (!value.matches("(?:\\d+(?:y|mo|w|d|h|m|s))+")) return -1;
         Matcher matcher = TOKEN.matcher(value);
         long total = 0;
-        while (matcher.find()) {
-            long n = Long.parseLong(matcher.group(1));
-            total += n * switch (matcher.group(2)) {
-                case "y" -> 31_536_000_000L;
-                case "mo" -> 2_592_000_000L;
-                case "w" -> 604_800_000L;
-                case "d" -> 86_400_000L;
-                case "h" -> 3_600_000L;
-                case "m" -> 60_000L;
-                default -> 1_000L;
-            };
+        try {
+            while (matcher.find()) {
+                long n = Long.parseLong(matcher.group(1));
+                long unit = switch (matcher.group(2)) {
+                    case "y" -> 31_536_000_000L;
+                    case "mo" -> 2_592_000_000L;
+                    case "w" -> 604_800_000L;
+                    case "d" -> 86_400_000L;
+                    case "h" -> 3_600_000L;
+                    case "m" -> 60_000L;
+                    default -> 1_000L;
+                };
+                total = Math.addExact(total, Math.multiplyExact(n, unit));
+            }
+        } catch (NumberFormatException | ArithmeticException e) {
+            return -1;
         }
         return total;
     }

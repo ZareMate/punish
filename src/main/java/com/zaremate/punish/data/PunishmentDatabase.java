@@ -101,6 +101,6 @@ public final class PunishmentDatabase {
                 .filter(e -> e.getValue().equalsIgnoreCase(name))
                 .findFirst()
                 .map(e -> new PunishService.GameProfileHolder(e.getValue(), e.getKey(),
-                        ips.getOrDefault(e.getKey(), List.of()).stream().findFirst().orElse(null)));
+                        ips.getOrDefault(e.getKey(), List.of()).isEmpty() ? null : ips.get(e.getKey()).getLast()));
     }
 }
