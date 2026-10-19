@@ -45,7 +45,7 @@ abstract class ServerFixture {
         when(players.getIpBans()).thenReturn(new IpBanList(root.resolve("banned-ips.json").toFile()));
         when(source.getServer()).thenReturn(server);
         when(source.getTextName()).thenReturn("Moderator");
-        when(source.hasPermission(2)).thenReturn(true);
+        when(source.hasPermission(4)).thenReturn(true);
         service = PunishMod.service(root);
         target = new PunishService.Target("Alex", uuid.toString(), "203.0.113.10", new GameProfile(uuid, "Alex"), null);
         service.db().names().put(uuid.toString(), "Alex");

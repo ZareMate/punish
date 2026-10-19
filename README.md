@@ -84,10 +84,10 @@ private, and link-local target addresses.
 
 Commands use NeoForge permission nodes, which LuckPerms can manage when installed
 as the active NeoForge permission handler. LuckPerms is optional; without a
-permission provider, all nodes default to operator level 2. With LuckPerms,
+permission provider, all nodes default to operator level 4. With LuckPerms,
 explicit grants allow non-operators and explicit denials override operator access.
-Unset nodes retain the operator-level-2 default. Console and command blocks retain
-their vanilla level-2 check.
+Unset nodes retain the operator-level-4 default. Console and command blocks require
+permission level 4.
 
 Normal, temporary, and undo variants share one permission per command family.
 IP punishment commands retain their own permissions.

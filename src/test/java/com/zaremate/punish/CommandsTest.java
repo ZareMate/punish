@@ -70,10 +70,10 @@ class CommandsTest extends ServerFixture {
         verify(p.connection).disconnect(any(net.minecraft.network.chat.Component.class));
     }
     @Test void consolePermissionAndSyntaxFailures() {
-        when(source.hasPermission(2)).thenReturn(false);
+        when(source.hasPermission(4)).thenReturn(false);
         for(var command:dispatcher.getRoot().getChildren()) assertFalse(command.canUse(source),command.getName());
         assertThrows(CommandSyntaxException.class,()->dispatcher.execute("ban Alex",source));
-        when(source.hasPermission(2)).thenReturn(true);
+        when(source.hasPermission(4)).thenReturn(true);
         assertThrows(CommandSyntaxException.class,()->dispatcher.execute("unoffense Alex 0",source));
         assertTrue(service.db().records().isEmpty());
     }

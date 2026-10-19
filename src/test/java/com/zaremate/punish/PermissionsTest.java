@@ -30,10 +30,10 @@ class PermissionsTest extends ServerFixture {
                 String expected="punish."+aliases.getOrDefault(command.getName(),command.getName());
                 @SuppressWarnings("unchecked") var node=(PermissionNode<Boolean>)event.getNodes().stream().filter(n->n.getNodeName().equals(expected)).findFirst().orElseThrow();
                 api.when(()->PermissionAPI.getPermission(p,node)).thenReturn(true);
-                when(source.hasPermission(2)).thenReturn(false);
+                when(source.hasPermission(4)).thenReturn(false);
                 assertTrue(command.canUse(source),expected+" non-op grant");
                 api.when(()->PermissionAPI.getPermission(p,node)).thenReturn(false);
-                when(source.hasPermission(2)).thenReturn(true);
+                when(source.hasPermission(4)).thenReturn(true);
                 assertFalse(command.canUse(source),expected+" op denial");
             }
         }
@@ -42,8 +42,8 @@ class PermissionsTest extends ServerFixture {
         var event=new PermissionGatherEvent.Nodes(); PunishPermissions.register(event);
         var p=player(uuid,"Alex",target.ip());
         for(var node:event.getNodes()) {
-            when(p.hasPermissions(2)).thenReturn(false); assertEquals(false,node.getDefaultResolver().resolve(p,uuid));
-            when(p.hasPermissions(2)).thenReturn(true); assertEquals(true,node.getDefaultResolver().resolve(p,uuid));
+            when(p.hasPermissions(4)).thenReturn(false); assertEquals(false,node.getDefaultResolver().resolve(p,uuid));
+            when(p.hasPermissions(4)).thenReturn(true); assertEquals(true,node.getDefaultResolver().resolve(p,uuid));
             assertEquals(false,node.getDefaultResolver().resolve(null,uuid));
         }
     }

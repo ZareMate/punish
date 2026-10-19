@@ -26,7 +26,7 @@ public final class PunishPermissions {
 
     private static PermissionNode<Boolean> node(String name) {
         return new PermissionNode<>(PunishMod.MOD_ID, name, PermissionTypes.BOOLEAN,
-                (player, uuid, context) -> player != null && player.hasPermissions(2));
+                (player, uuid, context) -> player != null && player.hasPermissions(4));
     }
 
     public static void register(PermissionGatherEvent.Nodes event) {
@@ -46,7 +46,7 @@ public final class PunishPermissions {
         PermissionNode<Boolean> node = Objects.requireNonNull(COMMANDS.get(permission), "Unknown punishment command");
         // Console and command blocks retain their vanilla permission-level checks.
         return source.getEntity() instanceof ServerPlayer player
-                ? has(player, node) : source.hasPermission(2);
+                ? has(player, node) : source.hasPermission(4);
     }
 
     public static boolean has(ServerPlayer player, PermissionNode<Boolean> node) {
